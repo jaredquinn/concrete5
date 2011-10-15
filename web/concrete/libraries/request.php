@@ -107,18 +107,33 @@ class Request {
 	public function getRequestedPage() {
 		$path = $this->getRequestCollectionPath();
 		$origPath = $path;
+
 		$r = Cache::get('request_path_page', $path);
+
 		if ($r == false) {
 			$r = array();
 			$db = Loader::db();
 			$cID = false;
-			while ((!$cID) && $path) {
-				$cID = $db->GetOne('select cID from PagePaths where cPath = ?', $path);
-				if ($cID) {
+
+			if(defined('PRETTY_FLAT_URLS')) {
+				if($c = strpos($path, '/', 1) === false) {
+					$handle = str_replace('/', '', $path);
+					$cID = $db->GetOne("select cID from PagePaths where cPath LIKE ?", "%/$handle");
 					$cPath = $path;
-					break;
+				} 
+			}
+			
+			if(!$cID) {
+
+				while ((!$cID) && $path) {
+					$cID = $db->GetOne('select cID from PagePaths where cPath = ?', $path);
+					if ($cID) {
+						$cPath = $path;
+						break;
+					}
+					$path = substr($path, 0, strrpos($path, '/'));
 				}
-				$path = substr($path, 0, strrpos($path, '/'));
+
 			}
 			
 			/*

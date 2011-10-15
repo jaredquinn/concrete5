@@ -12,6 +12,8 @@ defined('C5_EXECUTE') or die("Access Denied.");
 class Page extends Collection {
 
 	protected $blocksAliasedFromMasterCollection = null;
+
+	protected $flatPaths = false;
 	
 	/**
 	 * @param string $path /path/to/page
@@ -25,6 +27,9 @@ class Page extends Collection {
 		if ($cID == false) {
 			$db = Loader::db();
 			$cID = $db->GetOne("select cID from PagePaths where cPath = ?", array($path));
+			if(!$cID) {
+				$cID = $db->GetOne("select cID from Collections where cHandle = ?", array($path));
+			}
 			Cache::set("page_id_from_path", $path, $cID);
 		}
 		return Page::getByID($cID, $version);
@@ -66,12 +71,21 @@ class Page extends Collection {
 	protected function populatePage($cInfo, $where, $cvID) {
 		$db = Loader::db();
 		
-		$q0 = "select Pages.cID, Pages.pkgID, Pages.cPointerID, Pages.cPointerExternalLink, Pages.cPointerExternalLinkNewWindow, Pages.cFilename, Collections.cDateAdded, Pages.cDisplayOrder, Collections.cDateModified, cInheritPermissionsFromCID, cInheritPermissionsFrom, cOverrideTemplatePermissions, cPendingAction, cPendingActionUID, cPendingActionTargetCID, cPendingActionDatetime, cCheckedOutUID, cIsTemplate, uID, cPath, Pages.ctID, ctHandle, ctIcon, ptID, cParentID, cChildren, ctName, cCacheFullPageContent, cCacheFullPageContentOverrideLifetime, cCacheFullPageContentLifetimeCustom from Pages inner join Collections on Pages.cID = Collections.cID left join PageTypes on (PageTypes.ctID = Pages.ctID) left join PagePaths on (Pages.cID = PagePaths.cID and PagePaths.ppIsCanonical = 1) ";
+		$q0 = "select Pages.cID, Pages.pkgID, Pages.cPointerID, Pages.cPointerExternalLink, Pages.cPointerExternalLinkNewWindow, Pages.cFilename, Collections.cDateAdded, Pages.cDisplayOrder, Collections.cDateModified, Collections.cHandle, cInheritPermissionsFromCID, cInheritPermissionsFrom, cOverrideTemplatePermissions, cPendingAction, cPendingActionUID, cPendingActionTargetCID, cPendingActionDatetime, cCheckedOutUID, cIsTemplate, uID, cPath, Pages.ctID, ctHandle, ctIcon, ptID, cParentID, cChildren, ctName, cCacheFullPageContent, cCacheFullPageContentOverrideLifetime, cCacheFullPageContentLifetimeCustom from Pages inner join Collections on Pages.cID = Collections.cID left join PageTypes on (PageTypes.ctID = Pages.ctID) left join PagePaths on (Pages.cID = PagePaths.cID and PagePaths.ppIsCanonical = 1) ";
 		//$q2 = "select cParentID, cPointerID, cPath, Pages.cID from Pages left join PagePaths on (Pages.cID = PagePaths.cID and PagePaths.ppIsCanonical = 1) ";
-		
+
 		$v = array($cInfo);
 		$r = $db->query($q0 . $where, $v);
 		$row = $r->fetchRow();
+
+		if(defined('PRETTY_FLAT_URLS') && empty($row['cFilename']) && $row['ptID'] > 0) {
+			$e = explode('/', $row['cPath']);
+			$row['cPath'] = '/' . $e[ count($e) - 1 ];
+			$this->flatPath = true;
+		} else {
+			$this->flatPath = false;
+		}
+
 		if ($row['cPointerID'] > 0) {
 			$q1 = $q0 . "where Pages.cID = ?";
 			$cPointerOriginalID = $row['cID'];
@@ -486,7 +500,13 @@ class Page extends Collection {
 
 		
 		$q2 = "insert into PagePaths (cID, cPath) values (?, ?)";
-		$v2 = array($newCID, $cPath . '/' . $handle);
+
+		if(!$this->flatPath) {
+			$v2 = array($newCID, $cPath . '/' . $handle);
+		} else {
+			$v2 = array($newCID, '/' . $handle);
+		}
+
 		$db->query($q2, $v2);
 		
 		$c->refreshCache();
@@ -1225,6 +1245,11 @@ class Page extends Collection {
 	public function uniquifyPagePath($origPath) {
 		$db = Loader::db();
 
+		if($this->flatPath) {
+			$e = explode('/', $origPath);
+			$origPath = '/' . $e[ count($e) - 1 ];
+		}
+
 		$proceed = false;
 		$suffix = 0;
 		while ($proceed != true) {
@@ -1797,7 +1822,7 @@ class Page extends Collection {
 	
 	function rescanCollectionPathIndividual($cID, $cPath, $retainOldPagePath = false) {
 		$db = Loader::db();
-		$q = "select CollectionVersions.cID, CollectionVersions.cvHandle, CollectionVersions.cvID, PagePaths.cID as cpcID from CollectionVersions left join PagePaths on (PagePaths.cID = CollectionVersions.cID) where CollectionVersions.cID = '{$cID}' and CollectionVersions.cvIsApproved = 1";
+		$q = "select CollectionVersions.cID, CollectionVersions.cvHandle, CollectionVersions.cvID, PagePaths.cID as cpcID, Pages.cFilename, Pages.ptID from CollectionVersions left join PagePaths on (PagePaths.cID = CollectionVersions.cID) LEFT JOIN Pages ON (Pages.cID = CollectionVersions.cID) where CollectionVersions.cID = '{$cID}' and CollectionVersions.cvIsApproved = 1";
 		$r = $db->query($q);
 		if (!$r) return;
 
@@ -1806,7 +1831,11 @@ class Page extends Collection {
 			$row['cvHandle'] = $row['cID'];
 		}
 		if ($row['cvHandle']) {
-			$origPath = $cPath . '/' . $row['cvHandle'];
+			if(defined('PRETTY_FLAT_URLS') && $row['ptID'] > 0 && empty($row['cFilename'])) {
+				$origPath = '/' . $row['cvHandle'];
+			} else {
+				$origPath = $cPath . '/' . $row['cvHandle'];
+			}
 
 			// first, we check to see if this path already exists
 			$proceed = false;
