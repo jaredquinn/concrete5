@@ -79,8 +79,10 @@ class Page extends Collection {
 		$row = $r->fetchRow();
 
 		if(defined('PRETTY_FLAT_URLS') && empty($row['cFilename']) && $row['ptID'] > 0) {
-			$e = explode('/', $row['cPath']);
-			$row['cPath'] = '/' . $e[ count($e) - 1 ];
+			if($row['cPath'] != '/' && $row['cPath'] != '') {
+				$e = explode('/', $row['cPath']);
+				$row['cPath'] = '/' . $e[ count($e) - 1 ];
+			}
 			$this->flatPath = true;
 		} else {
 			$this->flatPath = false;
